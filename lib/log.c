@@ -36,8 +36,8 @@ void _log(log_level level, const char *file, unsigned lineno, const char *fmt,
         ...) {
 
     /* Skip printing messages outside of the log level */
-    if (level > current_log_level)
-        return;
+    //if (level > current_log_level)
+    //    return;
 
     va_list argptr;
     va_start(argptr, fmt);
