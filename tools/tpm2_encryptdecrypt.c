@@ -6,11 +6,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "files.h"
 #include "log.h"
 #include "tpm2.h"
-#include "tpm2_tool.h"
 #include "tpm2_alg_util.h"
 #include "tpm2_auth_util.h"
 #include "tpm2_options.h"
@@ -144,6 +144,8 @@ static tool_rc encrypt_decrypt(ESYS_CONTEXT *ectx) {
 
     UINT16 data_offset = 0;
     bool result = true;
+    struct timeval t1, t2;
+    double elapsedTime = 0.0f;
     FILE *out_file_ptr =
             ctx.out_file_path ? fopen(ctx.out_file_path, "wb+") : stdout;
     if (!out_file_ptr) {
@@ -159,6 +161,9 @@ static tool_rc encrypt_decrypt(ESYS_CONTEXT *ectx) {
     uint8_t pad_data = 0;
 
     uint16_t remaining_bytes = ctx.input_data_size;
+
+    LOG_INFO("Data size (bytes): %i", remaining_bytes);
+
     if (ctx.mode == TPM2_ALG_ECB) {
         iv_in = NULL;
     }
@@ -198,9 +203,18 @@ static tool_rc encrypt_decrypt(ESYS_CONTEXT *ectx) {
 
         memcpy(in_data.buffer, &ctx.input_data[data_offset], in_data.size);
 
+        gettimeofday(&t1, NULL);
+
         rc = tpm2_encryptdecrypt(ectx, &ctx.encryption_key.object,
                 ctx.is_decrypt, ctx.mode, iv_in, &in_data, &out_data, &iv_out,
                 NULL);
+
+        gettimeofday(&t2, NULL);
+    
+        // compute and print the elapsed time in millisec
+        elapsedTime += (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+
         if (rc != tool_rc_success) {
             goto out;
         }
@@ -249,6 +263,8 @@ out:
     if (out_file_ptr != stdout) {
         fclose(out_file_ptr);
     }
+    
+    LOG_INFO("Elapsed time (ms): %f", elapsedTime);
 
     return rc;
 }
@@ -344,7 +360,7 @@ static bool on_args(int argc, char *argv[]) {
     return true;
 }
 
-static bool tpm2_tool_onstart(tpm2_options **opts) {
+bool tpm2_tool_onstart(tpm2_options **opts) {
 
     const struct option topts[] = {
         { "auth",        required_argument, NULL, 'p' },
@@ -410,7 +426,7 @@ static bool is_input_options_args_valid(void) {
     return true;
 }
 
-static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
+tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
 
     UNUSED(flags);
 
@@ -432,15 +448,12 @@ static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
         LOG_ERR("Failure to setup key mode.");
         return tool_rc_general_error;
     }
-
+    
     return encrypt_decrypt(ectx);
 }
 
-static tool_rc tpm2_tool_onstop(ESYS_CONTEXT *ectx) {
+tool_rc tpm2_tool_onstop(ESYS_CONTEXT *ectx) {
     UNUSED(ectx);
 
     return tpm2_session_close(&ctx.encryption_key.object.session);
 }
-
-// Register this tool with tpm2_tool.c
-TPM2_TOOL_REGISTER("encryptdecrypt", tpm2_tool_onstart, tpm2_tool_onrun, tpm2_tool_onstop, NULL)
