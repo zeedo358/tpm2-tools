@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <stdio.h>
+#include <errno.h>
+#include <string.h>
 
 #include "files.h"
 #include "log.h"
@@ -38,53 +40,89 @@ static tool_rc rsa_encrypt_and_save(ESYS_CONTEXT *context) {
 
     struct timeval t1, t2;
     float elapsedTime = 0.0f;
-    float elapsed_time_array[100];
 
-    for (int i = 0; i < 100; i++)
+    // Open file and get its size
+    FILE *f = fopen(ctx.input_path, "rb");
+    if (!f) {
+        LOG_ERR("Could not open file \"%s\"", ctx.input_path);
+        return false;
+    }
+
+    const unsigned long MAX_FILE_SIZE = 60 * 1024;
+
+    const int CHUNK_SIZE = 245;
+    const int ENCRYPTED_CHUNK_SIZE = 256;
+
+    BYTE *input_buffer = malloc(MAX_FILE_SIZE);
+    BYTE *start_input_buffer = input_buffer;
+    UINT16 count_bytes_read = MAX_FILE_SIZE;
+
+    bool res = file_read_bytes_from_file(f,input_buffer,&count_bytes_read,ctx.input_path);
+    const unsigned long FILE_SIZE = count_bytes_read;
+    
+    if(!res){
+        LOG_ERR("Input file read failed");
+    }
+    LOG_INFO("File size: %lu, read bytes: %u", FILE_SIZE, count_bytes_read);
+
+    const int FULL_CHUNKS = FILE_SIZE / CHUNK_SIZE;
+    const int LAST_BYTES = FILE_SIZE - (FULL_CHUNKS * CHUNK_SIZE);
+    unsigned long ENCRYPTED_FILE_SIZE = ((FULL_CHUNKS + 1) * ENCRYPTED_CHUNK_SIZE);
+    BYTE *output_buffer = malloc(ENCRYPTED_FILE_SIZE);
+    BYTE *start_output_buffer = output_buffer;
+
+    gettimeofday(&t1, NULL);
+
+    for (int i = 0; i <= FULL_CHUNKS; i++)
     {
-        gettimeofday(&t1, NULL);
+        int size_of_bytes;
+
+        if(i == FULL_CHUNKS){
+            size_of_bytes = LAST_BYTES;
+        } else {
+            size_of_bytes = CHUNK_SIZE;
+        }
+
+        memcpy(ctx.message.buffer, input_buffer, size_of_bytes);
+        ctx.message.size = size_of_bytes;
 
         rc = tpm2_rsa_encrypt(context, &ctx.key_context,
                 &ctx.message, &ctx.scheme, &ctx.label, &out_data);
 
-        LOG_INFO("First byte of buffer: %X", ctx.message.buffer[0]);
-        ctx.message.buffer[0]++;
-        LOG_INFO("First byte of buffer after change: %X", ctx.message.buffer[0]);
-        
-        gettimeofday(&t2, NULL);
+        if (rc != tool_rc_success) {
+            return rc;
+        }
 
-        // compute and print the elapsed time in millisec
-        elapsedTime += (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
-        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+        memcpy(output_buffer, out_data->buffer, out_data->size);
 
-        elapsed_time_array[i] = elapsedTime;
-        elapsedTime = 0;
-    }
-    
-
-    if (rc != tool_rc_success) {
-        return rc;
+        output_buffer += ENCRYPTED_CHUNK_SIZE;
+        input_buffer += CHUNK_SIZE;
     }
 
-    FILE *f = ctx.output_path ? fopen(ctx.output_path, "wb+") : stdout;
+    gettimeofday(&t2, NULL);
+
+    // compute and print the elapsed time in millisec
+    elapsedTime += (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
+    elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+
+    fclose(f); 
+
+    f = ctx.output_path ? fopen(ctx.output_path, "wb+") : stdout;
     if (!f) {
         goto out;
     }
 
-    ret = files_write_bytes(f, out_data->buffer, out_data->size);
+    ret = files_write_bytes(f, output_buffer, ENCRYPTED_FILE_SIZE);
     if (f != stdout) {
         fclose(f);
     }
 
 out:
     free(out_data);
+    free(start_input_buffer);
+    free(start_output_buffer);
 
-    char message_buffer[256];
-
-    for (int i = 0; i < 100; i++){
-        sprintf(message_buffer, "Iteration - %d, Elapsed time (ms): %f",i, elapsed_time_array[i]);
-        LOG_INFO("%s",message_buffer);
-    }
+    LOG_INFO("Elapsed time (ms): %f", elapsedTime);
     
     return ret ? tool_rc_success : tool_rc_general_error;
 }
@@ -142,11 +180,12 @@ static tool_rc init(ESYS_CONTEXT *context) {
     }
 
     ctx.message.size = BUFFER_SIZE(TPM2B_PUBLIC_KEY_RSA, buffer);
-    bool result = files_load_bytes_from_buffer_or_file_or_stdin(NULL,
-            ctx.input_path, &ctx.message.size, ctx.message.buffer);
-    if (!result) {
-        return tool_rc_general_error;
-    }
+    //bool result = files_load_bytes_from_buffer_or_file_or_stdin(NULL,
+    //        ctx.input_path, &ctx.message.size, ctx.message.buffer);
+
+    //if (!result) {
+        //return tool_rc_general_error;
+    //}
 
     /*
      * Load the decryption key
