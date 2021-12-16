@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <stdio.h>
 
 #include "files.h"
 #include "log.h"
@@ -32,9 +34,34 @@ static tool_rc rsa_encrypt_and_save(ESYS_CONTEXT *context) {
 
     bool ret = false;
     TPM2B_PUBLIC_KEY_RSA *out_data = NULL;
+    tool_rc rc;
 
-    tool_rc rc = tpm2_rsa_encrypt(context, &ctx.key_context,
-            &ctx.message, &ctx.scheme, &ctx.label, &out_data);
+    struct timeval t1, t2;
+    float elapsedTime = 0.0f;
+    float elapsed_time_array[100];
+
+    for (int i = 0; i < 100; i++)
+    {
+        gettimeofday(&t1, NULL);
+
+        rc = tpm2_rsa_encrypt(context, &ctx.key_context,
+                &ctx.message, &ctx.scheme, &ctx.label, &out_data);
+
+        LOG_INFO("First byte of buffer: %X", ctx.message.buffer[0]);
+        ctx.message.buffer[0]++;
+        LOG_INFO("First byte of buffer after change: %X", ctx.message.buffer[0]);
+        
+        gettimeofday(&t2, NULL);
+
+        // compute and print the elapsed time in millisec
+        elapsedTime += (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+
+        elapsed_time_array[i] = elapsedTime;
+        elapsedTime = 0;
+    }
+    
+
     if (rc != tool_rc_success) {
         return rc;
     }
@@ -51,6 +78,14 @@ static tool_rc rsa_encrypt_and_save(ESYS_CONTEXT *context) {
 
 out:
     free(out_data);
+
+    char message_buffer[256];
+
+    for (int i = 0; i < 100; i++){
+        sprintf(message_buffer, "Iteration - %d, Elapsed time (ms): %f",i, elapsed_time_array[i]);
+        LOG_INFO("%s",message_buffer);
+    }
+    
     return ret ? tool_rc_success : tool_rc_general_error;
 }
 
