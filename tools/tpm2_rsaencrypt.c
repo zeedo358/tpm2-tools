@@ -78,6 +78,9 @@ static tool_rc rsa_encrypt_and_save(ESYS_CONTEXT *context) {
         int size_of_bytes;
 
         if(i == FULL_CHUNKS){
+            if(LAST_BYTES == 0){
+                break;
+            }
             size_of_bytes = LAST_BYTES;
         } else {
             size_of_bytes = CHUNK_SIZE;
