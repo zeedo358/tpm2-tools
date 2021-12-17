@@ -112,7 +112,7 @@ static tool_rc rsa_encrypt_and_save(ESYS_CONTEXT *context) {
         goto out;
     }
 
-    ret = files_write_bytes(f, output_buffer, ENCRYPTED_FILE_SIZE);
+    ret = files_write_bytes(f, start_output_buffer, ENCRYPTED_FILE_SIZE);
     if (f != stdout) {
         fclose(f);
     }
