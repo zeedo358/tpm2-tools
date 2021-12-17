@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "files.h"
 #include "log.h"
@@ -52,14 +53,65 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
         return rc;
     }
 
-    tool_rc rc = tpm2_rsa_decrypt(ectx, &ctx.key.object, &ctx.cipher_text,
-            &ctx.scheme, &ctx.label, &message, NULL);
-    if (rc != tool_rc_success) {
-        return rc;
+    // Open file and get its size
+    FILE *f = fopen(ctx.input_path, "rb");
+    if (!f) {
+        LOG_ERR("Could not open file \"%s\"", ctx.input_path);
+        return false;
     }
 
+    const unsigned long MAX_FILE_SIZE = 60 * 1024;
+
+    const int CHUNK_SIZE = 256;
+    const int DECRYPTED_CHUNK_SIZE = 245;
+
+    BYTE *input_buffer = malloc(MAX_FILE_SIZE);
+    BYTE *start_input_buffer = input_buffer;
+    UINT16 count_bytes_read = MAX_FILE_SIZE;
+
+    bool res = file_read_bytes_from_file(f,input_buffer,&count_bytes_read,ctx.input_path);
+    const unsigned long FILE_SIZE = count_bytes_read;
+    
+    if(!res){
+        LOG_ERR("Input file read failed");
+    }
+    LOG_INFO("File size: %lu, read bytes: %u", FILE_SIZE, count_bytes_read);
+
+    const int FULL_CHUNKS = FILE_SIZE / CHUNK_SIZE;
+    const int LAST_BYTES = FILE_SIZE - (FULL_CHUNKS * CHUNK_SIZE);
+    unsigned long DECRYPTED_FILE_SIZE = ((FULL_CHUNKS + 1) * DECRYPTED_CHUNK_SIZE);
+    BYTE *output_buffer = malloc(DECRYPTED_FILE_SIZE);
+    BYTE *start_output_buffer = output_buffer;
+
+    for (int i = 0; i <= FULL_CHUNKS; i++)
+    {
+        int size_of_bytes;
+
+        if(i == FULL_CHUNKS){
+            size_of_bytes = LAST_BYTES;
+        } else {
+            size_of_bytes = CHUNK_SIZE;
+        }
+
+        memcpy(ctx.cipher_text.buffer, input_buffer, size_of_bytes);
+        ctx.cipher_text.size = size_of_bytes;
+
+        tool_rc rc = tpm2_rsa_decrypt(ectx, &ctx.key.object, &ctx.cipher_text,
+            &ctx.scheme, &ctx.label, &message, NULL);
+        if (rc != tool_rc_success) {
+            return rc;
+        }
+
+        memcpy(output_buffer, message->buffer, message->size);
+
+        output_buffer += DECRYPTED_CHUNK_SIZE;
+        input_buffer += CHUNK_SIZE;
+    }
+
+    fclose(f); 
+
     bool ret = false;
-    FILE *f =
+    f =
             ctx.output_file_path ? fopen(ctx.output_file_path, "wb+") : stdout;
     if (!f) {
         goto out;
@@ -72,6 +124,8 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
 
 out:
     free(message);
+    free(start_input_buffer);
+    free(start_output_buffer);
 
     return ret ? tool_rc_success : tool_rc_general_error;
 }
@@ -184,11 +238,11 @@ static tool_rc init(ESYS_CONTEXT *ectx) {
      * Get enc data blob
      */
     ctx.cipher_text.size = BUFFER_SIZE(TPM2B_PUBLIC_KEY_RSA, buffer);
-    bool result = files_load_bytes_from_buffer_or_file_or_stdin(NULL,
+    /*bool result = files_load_bytes_from_buffer_or_file_or_stdin(NULL,
             ctx.input_path, &ctx.cipher_text.size, ctx.cipher_text.buffer);
     if (!result) {
         rc = tool_rc_general_error;
-    }
+    }*/
 
 out:
     Esys_Free(key_public_info);
