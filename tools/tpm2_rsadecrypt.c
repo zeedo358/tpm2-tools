@@ -79,8 +79,10 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
 
     const int FULL_CHUNKS = FILE_SIZE / CHUNK_SIZE;
     const int LAST_BYTES = FILE_SIZE - (FULL_CHUNKS * CHUNK_SIZE);
-    unsigned long DECRYPTED_FILE_SIZE = ((FULL_CHUNKS + 1) * DECRYPTED_CHUNK_SIZE);
-    BYTE *output_buffer = malloc(DECRYPTED_FILE_SIZE);
+    const unsigned long MAX_DECRYPTED_FILE_SIZE = (FULL_CHUNKS * DECRYPTED_CHUNK_SIZE + LAST_BYTES);
+
+    unsigned long decrypted_file_size = 0;
+    BYTE *output_buffer = malloc(MAX_DECRYPTED_FILE_SIZE);
     BYTE *start_output_buffer = output_buffer;
 
     for (int i = 0; i <= FULL_CHUNKS; i++)
@@ -88,6 +90,9 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
         int size_of_bytes;
 
         if(i == FULL_CHUNKS){
+            if(LAST_BYTES == 0){
+                break;
+            }
             size_of_bytes = LAST_BYTES;
         } else {
             size_of_bytes = CHUNK_SIZE;
@@ -104,6 +109,7 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
 
         memcpy(output_buffer, message->buffer, message->size);
 
+        decrypted_file_size += message->size ? message->size : 0;
         output_buffer += DECRYPTED_CHUNK_SIZE;
         input_buffer += CHUNK_SIZE;
     }
@@ -117,7 +123,7 @@ static tool_rc rsa_decrypt_and_save(ESYS_CONTEXT *ectx) {
         goto out;
     }
 
-    ret = files_write_bytes(f, message->buffer, message->size);
+    ret = files_write_bytes(f, start_output_buffer, decrypted_file_size);
     if (f != stdout) {
         fclose(f);
     }
